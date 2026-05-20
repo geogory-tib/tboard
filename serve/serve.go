@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 	commandparse "tboard/command_parse"
-
+	ed "tboard/ed"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -123,22 +123,9 @@ func (srv *Server)ViewPID(PID int,user *UserInfo)error{
 }
 func (srv *Server)Post(user *UserInfo){
 	//TODO -- MAKE ed LIKE EDITOR
-	user.Conn.Write([]byte("Type your post and when finished end with a single '.'\r\n"))
-	builder := strings.Builder{}
-	for{
-		n,err := user.Conn.Read(user.buf)
-		if err != nil{
-			log.Print(err)
-			return
-		}
-		input := user.buf[:n]
-		if(len(input) == 3 &&input[0] == '.'){
-			break
-		}
-		builder.Write(input)
-	}
+	post,err := ed.Post_Editor(user.Conn)
 	sql_stmt := fmt.Sprintf("INSERT INTO %s (poster_id,body) VALUES (?, ?)",user.Current_Board)
-	_,err := srv.DBconn.Exec(sql_stmt,user.UID[:],builder.String())
+	_,err = srv.DBconn.Exec(sql_stmt,user.UID[:],post)
 	if err != nil{
 		log.Print(err)
 	}
@@ -159,7 +146,7 @@ func (srv *Server)BoardLoop(user *UserInfo,board string){
 		}
 		user_in := string(user.buf[:n])
 		user_in = strings.Trim(user_in,"\r\n")
-		cmd,err :=commandparse.Parse_Command(strings.ToLower(user_in))
+		cmd,err :=commandparse.Parse_Command(strings.ToLower(user_in),commandparse.CommandTypeBoard)
 		if(err != nil){
 			user.Conn.Write([]byte(err.Error()))
 		}else{

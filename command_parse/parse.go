@@ -9,6 +9,10 @@ import (
 	"time"
 	"unicode"
 )
+
+const CommandTypeBoard = 0
+const CommandTypeEditor = 1
+
 const(
 	Command_View = iota + 1
 	Command_Post
@@ -17,14 +21,15 @@ const(
 	Command_Exit
 )
 
-var command_table = map[string]int{
+var command_table map[string]int
+
+var board_commands = map[string]int{
 	"view": Command_View,
 	"post": Command_Post,
 	"next": Command_Next,
 	"goto": Command_Goto,
 	"exit": Command_Exit,
 }
-
 const(
 	View_Default = iota
 	View_PostID
@@ -45,12 +50,40 @@ const(
 	Next_Default = iota
 	Next_Skip
 )
+const(
+	Editor_View = iota + 1
+	Editor_Append
+	Editor_Swap
+	Editor_Delete
+	Editor_Exit
+	Editor_Help
+)
+var editor_commands = map[string]int{
+	"view": Editor_View,
+	"append": Editor_Append,
+	"swap": Editor_Swap,
+	"delete": Editor_Delete,
+	"exit": Editor_Exit,
+	"help": Editor_Help,
+}
+const(
+	Editor_View_Default = iota
+	Editor_View_Line
+	Editor_View_Range
+	Editor_View_All
+)
 
+const(
+	Editor_Append_Default = iota
+	Editor_Append_Line
+)
 
 const(
 	TOK_SYMBOL = iota
 	TOK_NUM
 	TOK_DATE
+	TOK_STAR
+	TOK_AMB
 	TOK_EOF
 )
 
@@ -174,6 +207,26 @@ func(lex *lexer)lex()error{
 			switch(ch){
 				case ' ':
 				{
+					lex.pull_ch()
+				}
+				case '*':
+				{
+					tok := token{
+						tok_type:TOK_STAR,
+						raw:lex.input[lex.current_pos:lex.current_pos],
+						val:0,
+					}
+					lex.tokens = append(lex.tokens,tok)
+					lex.pull_ch()
+				}
+				case '&':
+				{
+					tok := token{
+						tok_type:TOK_STAR,
+						raw:lex.input[lex.current_pos:lex.current_pos],
+						val:0,
+					}
+					lex.tokens = append(lex.tokens,tok)
 					lex.pull_ch()
 				}
 				case 0:
@@ -330,7 +383,7 @@ func (parser *command_parser)parser_view()error{
 	}
 	return nil
 }
-func (parser *command_parser)parse()error{
+func (parser *command_parser)parse_board_cmd()error{
 	primary_command_tok := parser.pull_tok()
 	val,ok := command_table[primary_command_tok.raw]
 	if(!ok){
@@ -393,15 +446,133 @@ func (parser *command_parser)parse()error{
 	}
 	return nil
 }
+func (parser *command_parser)fail_if_not_eof(prev_tok_raw string)error{
+	eof_tok := parser.pull_tok()
+	if(eof_tok.tok_type != TOK_EOF){
+		return 	errors.New(fmt.Sprintf("Unexpected token '%s' after '%s'\r\n",eof_tok.raw,prev_tok_raw))
+	}
+	return nil
+}
+func(parser *command_parser)parse_editor_view()error{
+	sub_tok := parser.pull_tok()
+	switch(sub_tok.tok_type){
+		case TOK_NUM:
+		{
+			parser.command.SubCom_Type = Editor_View_Line
+			err := parser.fail_if_not_eof(sub_tok.raw)
+			if(err != nil){
+				return err
+			}
+			parser.command.Arguments = append(parser.command.Arguments,Arg{Tag:Arg_Int,type_i:&sub_tok.val})
+		}
+		case TOK_EOF:
+		{
+			parser.command.SubCom_Type = Editor_View_Default
+		}
+		case TOK_STAR:
+		{
+			parser.command.SubCom_Type = Editor_View_All
+			err := parser.fail_if_not_eof(sub_tok.raw)
+			if(err != nil){
+				return err
+			}
+		}
+		case TOK_SYMBOL:
+		{
+			if(sub_tok.raw != "range"){
+				return fmt.Errorf("Invaild subcommand '%s' for editor view command",sub_tok.raw)
+			}
+		}
+		default:
+		return fmt.Errorf("Invaild subcommand '%s' for editor view command",sub_tok.raw)
+	}
+	return nil
+}
+func(parser *command_parser)parser_editor_commands()error{
+	command_tok := parser.pull_tok()
+	val,ok := command_table[command_tok.raw]
+	if(!ok){
+		if(command_tok.tok_type == TOK_NUM){
+			parser.command.Command_Type = Editor_View
+			parser.command.SubCom_Type = Editor_View_Line
+			parser.command.Arguments = append(parser.command.Arguments,Arg{Tag:Arg_Int,type_i:&command_tok.val})
+			goto end
+		}
+		builder := strings.Builder{}
+		for cmd := range command_table{
+			builder.WriteString(cmd + "\r\n")
+		}
+		return errors.New(fmt.Sprintf("Unknown primary command '%s',vald commands are\r\n%s",command_tok.raw,builder.String()))
+	}
+	parser.command.Command_Type = val
+	switch(val){
+		case Editor_View:
+		{
+			err := parser.parse_editor_view()
+			if err != nil{
+				return err
+			}
+		}
+		case Editor_Append:
+		{
+			sub_tok := parser.pull_tok()
+			if(sub_tok.tok_type == TOK_EOF){
+				goto end
+			}else if(sub_tok.tok_type == TOK_NUM){
+				err := parser.fail_if_not_eof(sub_tok.raw)
+				if(err != nil){
+					return err
+				}
+				parser.command.SubCom_Type = Editor_Append_Line
+				parser.command.Arguments = append(parser.command.Arguments,Arg{Tag:Arg_Int,type_i:&sub_tok.val})
+			}else{
+				return fmt.Errorf("Invaild subcommand '%s' for append command\r\n",sub_tok.raw)
+			}
+		}
+		case Editor_Swap, Editor_Delete:
+		{
+			num_tok := parser.pull_tok()
+			if(num_tok.tok_type != TOK_NUM){
+				return fmt.Errorf("Invaild token '%s'. Swap command expects a number argument\n\r",num_tok.raw)
+			}
+			err := parser.fail_if_not_eof(num_tok.raw)
+			if(err != nil){
+				return err
+			}
+			parser.command.Arguments = append(parser.command.Arguments,Arg{Tag:Arg_Int,type_i:&num_tok.val})
+		}
+		case Editor_Exit,Editor_Help:
+		{
+			err := parser.fail_if_not_eof(command_tok.raw)
+			if(err != nil){
+				return err
+			}
+		}
+		default:
+		panic("Unreachable state")
+	}
+	end:
+	return nil
+}
 
-func Parse_Command(user_in string)(cmd Parsed_Command,err error){
+func Parse_Command(user_in string,cmd_type int)(cmd Parsed_Command,err error){
+	
 	toks,err := LexInput(user_in)
 	if(err != nil){
 		return cmd,err
 	}
 	parser := command_parser{}
 	parser.input = toks
-	err = parser.parse()
+	switch cmd_type{
+		case CommandTypeBoard:
+		command_table = board_commands
+		err = parser.parse_board_cmd()
+		case CommandTypeEditor:
+		command_table = editor_commands
+		err = parser.parser_editor_commands()
+		default:
+		panic("Invaild command type for Parse_Command Function")
+	}
 	if(err != nil){
 		return cmd,err
 	}
