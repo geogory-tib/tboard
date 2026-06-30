@@ -1,6 +1,7 @@
 package ed
 
 import (
+	"errors"
 	"net"
 	"slices"
 	"strings"
@@ -8,6 +9,26 @@ import (
 
 	"fmt"
 )
+
+const editor_help string = `This editor is super simple and should be easy to use!
+----------------------------------------------------------------------------------
+append is used to add text to the buffer,it has 3 modes
+    append | this will add text to the bottom of the buffer.
+    append 1(or any valid line number) | this will insert text starting at that point.
+----------------------------------------------------------------------------------
+the view command is also super simple there are 4 modes to the command.
+    view | the default operation is to just view the current line!
+    view 1(or any valid line number)  | will view the given line number.
+    view range 1 3 (any 2 valid line numbers are supplied to this command) | this will view a range of the buffer!
+    view * | this will view the WHOLE buffer.
+----------------------------------------------------------------------------------
+the swap command is simple and only has one mode of operation
+    swap 1(or any valid line number) | you can easily swap certian lines with new lines of text!
+----------------------------------------------------------------------------------
+the delete command is also just as simple with one mode of operation
+    swap 1(or any valid line number) | you can easily swap certian lines with new lines of text!
+----------------------------------------------------------------------------------
+`
 
 
 type editor struct{
@@ -23,7 +44,7 @@ func Post_Editor(user_conn net.Conn)(string,error){
 	ed.conn = user_conn
 	ed.line_buf = make([]string,0,5)
 	ed.user_buffer = make([]byte,512)
-	user_conn.Write([]byte("This is an 'ed' like editor please type 'help' for assitance\r\n"))
+	user_conn.Write([]byte("This is a simple  editor please type 'help' for assitance\r\n"))
 	return ed.ed_loop()
 }
 
@@ -123,8 +144,8 @@ func(ed *editor)handle_view(cmd commandparse.Parsed_Command)error{
 		}
 		case commandparse.Editor_View_All:
 		{
-			for _,str := range ed.line_buf{
-				fmt.Fprintf(ed.conn,str)
+			for line_number ,str := range ed.line_buf{
+				fmt.Fprintf(ed.conn,"%d: %s",line_number + 1,str)
 			}
 		}
 		
@@ -177,6 +198,14 @@ func(ed *editor)eval_command(cmd commandparse.Parsed_Command)error{
 				return fmt.Errorf("Invaild line number %d\r\n",line + 1)
 			}
 			ed.line_buf = slices.Delete(ed.line_buf,line,line + 1)
+		}
+		case commandparse.Editor_Help:
+		{
+			fmt.Fprint(ed.conn,editor_help)
+		}
+		default:
+		{
+			return errors.New("Unimplemented command!\r\n")
 		}
 	}
 	return nil

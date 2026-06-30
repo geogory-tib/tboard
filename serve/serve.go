@@ -1,3 +1,4 @@
+
 package serve
 
 import (
@@ -78,7 +79,7 @@ func (srv *Server)GetBoards()string{
 		if !slices.Contains(srv.BoardList,table_name){
 			srv.BoardList = append(srv.BoardList,table_name)
 		}
-		if(table_name != "admins" &&  table_name != "desc"){
+		if(strings.Contains(table_name,"board")){
 			desc_str := ""
 			sql_stmt := `SELECT text FROM desc WHERE board = ?`
 			err := srv.DBconn.QueryRow(sql_stmt,table_name).Scan(&desc_str)
@@ -124,6 +125,9 @@ func (srv *Server)ViewPID(PID int,user *UserInfo)error{
 func (srv *Server)Post(user *UserInfo){
 	//TODO -- MAKE ed LIKE EDITOR
 	post,err := ed.Post_Editor(user.Conn)
+	if(len(post) == 0){
+		return
+	}
 	sql_stmt := fmt.Sprintf("INSERT INTO %s (poster_id,body) VALUES (?, ?)",user.Current_Board)
 	_,err = srv.DBconn.Exec(sql_stmt,user.UID[:],post)
 	if err != nil{
@@ -136,8 +140,12 @@ func (srv *Server)BoardLoop(user *UserInfo,board string){
 		return
 	}
 	user.Current_Board = board
-	srv.goto_date("today",user)
-	srv.ViewPID(user.Current_PID,user)
+	err := srv.goto_date("today",user)
+	if(err != nil){
+		fmt.Fprint(user.Conn,err.Error())
+	}else{
+		srv.ViewPID(user.Current_PID,user)
+	}
 	for{
 		n,err := user.Conn.Read(user.buf)
 		if err != nil{
@@ -196,6 +204,10 @@ func (srv *Server)EvalCommand(cmd commandparse.Parsed_Command,user *UserInfo)err
 		case commandparse.Command_Post:
 		{
 			srv.Post(user)
+		}
+		default:
+		{
+			return errors.New("Unimplemented command")
 		}
 	}
 	return nil
@@ -283,8 +295,7 @@ func (srv *Server)goto_date(date string,user *UserInfo)error{
 		sql_stmt := fmt.Sprintf("SELECT post_id FROM %s WHERE posted_date = date('now');",user.Current_Board)
 		err := srv.DBconn.QueryRow(sql_stmt).Scan(&user.Current_PID)
 		if(err != nil){
-			fmt.Fprintf(user.Conn,"There are no posts in the Board '%s' Today! Create one!\r\n",user.Current_Board)
-			log.Print(err)
+			err = fmt.Errorf("There are no posts in the Board '%s' Today! Create one!\r\n",user.Current_Board)
 			return err
 		}
 		return nil

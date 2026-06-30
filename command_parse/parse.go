@@ -482,6 +482,17 @@ func(parser *command_parser)parse_editor_view()error{
 			if(sub_tok.raw != "range"){
 				return fmt.Errorf("Invaild subcommand '%s' for editor view command",sub_tok.raw)
 			}
+			parser.command.SubCom_Type = Editor_View_Range
+			start := parser.pull_tok()
+			if(start.tok_type != TOK_NUM){
+				return fmt.Errorf("View range expects two number arguments '%s'\r\n",sub_tok.raw)
+			}
+			parser.command.Arguments = append(parser.command.Arguments,Arg{Tag:Arg_Int,type_i:&start.val})
+			end := parser.pull_tok()
+			if(end.tok_type != TOK_NUM){
+				return fmt.Errorf("View range expects two number arguments '%s'\r\n",sub_tok.raw)
+			}
+			parser.command.Arguments = append(parser.command.Arguments,Arg{Tag:Arg_Int,type_i:&end.val})
 		}
 		default:
 		return fmt.Errorf("Invaild subcommand '%s' for editor view command",sub_tok.raw)
